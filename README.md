@@ -12,24 +12,25 @@ Telegram-бот и HTTP API для ведения личных заметок. �
 - Авторизация через логин и пароль.
 - Ответы бота форматируются с поддержкой Markdown.
 
-## Переменные окружения
+## Конфигурация через `.env`
 
-- `BOT_TOKEN` — токен Telegram-бота.
-- `DATABASE_URL` — строка подключения к PostgreSQL.
-- `HTTP_ADDR` — адрес HTTP API (по умолчанию `:8080`).
-- `API_USER` / `API_PASSWORD` — учетные данные для HTTP API (Basic Auth).
-- `BOT_LOGIN` / `BOT_PASSWORD` — логин и пароль для Telegram-бота.
+Все переменные окружения хранятся в файле `.env` в корне проекта и автоматически загружаются при запуске.
+
+Пример `.env`:
+
+```env
+BOT_TOKEN=change_me
+DATABASE_URL=postgres://user:pass@localhost:5432/notes?sslmode=disable
+HTTP_ADDR=:8080
+API_USER=api
+API_PASSWORD=secret
+BOT_LOGIN=bot
+BOT_PASSWORD=secret
+```
 
 ## Запуск
 
 ```bash
-export BOT_TOKEN="ваш_токен"
-export DATABASE_URL="postgres://user:pass@localhost:5432/notes?sslmode=disable"
-export API_USER="api"
-export API_PASSWORD="secret"
-export BOT_LOGIN="bot"
-export BOT_PASSWORD="secret"
-
 go run .
 ```
 
