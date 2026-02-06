@@ -1,6 +1,11 @@
 package main
 
-import "os"
+import (
+	"log"
+	"os"
+
+	"github.com/joho/godotenv"
+)
 
 // Config хранит настройки приложения из переменных окружения.
 type Config struct {
@@ -13,8 +18,12 @@ type Config struct {
 	BotPassword string
 }
 
-// LoadConfig читает переменные окружения и возвращает заполненную конфигурацию.
+// LoadConfig загружает переменные из .env в корне проекта и возвращает конфигурацию.
 func LoadConfig() Config {
+	if err := godotenv.Load(".env"); err != nil {
+		log.Printf(".env not loaded: %v", err)
+	}
+
 	return Config{
 		BotToken:    os.Getenv("BOT_TOKEN"),
 		DatabaseURL: os.Getenv("DATABASE_URL"),

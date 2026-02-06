@@ -22,13 +22,7 @@ type TelegramBot struct {
 
 // NewTelegramBot создает новый бот с доступом к хранилищу.
 func NewTelegramBot(store *NotesStore, token, login, password string) *TelegramBot {
-	return &TelegramBot{
-		store:     store,
-		token:     token,
-		login:     login,
-		password:  password,
-		parseMode: tgbotapi.ModeMarkdown,
-	}
+	return &TelegramBot{store: store, token: token, login: login, password: password, parseMode: tgbotapi.ModeMarkdown}
 }
 
 // Start запускает цикл получения обновлений.
@@ -55,10 +49,8 @@ func (b *TelegramBot) Start(ctx context.Context) error {
 			if update.Message == nil {
 				continue
 			}
-
 			userID := update.Message.From.ID
 			text := strings.TrimSpace(update.Message.Text)
-
 			reply := b.handleMessage(ctx, userID, text)
 			msg := tgbotapi.NewMessage(update.Message.Chat.ID, reply)
 			msg.ParseMode = b.parseMode
@@ -76,7 +68,6 @@ func (b *TelegramBot) handleMessage(ctx context.Context, userID int64, text stri
 	if text == "" {
 		return "Пришлите команду или текст заметки. Используйте /help для справки."
 	}
-
 	fields := strings.Fields(text)
 	command := fields[0]
 
@@ -155,21 +146,25 @@ func (b *TelegramBot) handleAuthorized(ctx context.Context, userID int64, comman
 		if !deleted {
 			return "Заметка с таким номером не найдена."
 		}
-		return "Заметка удалена."
+		return "Заметка помечена как удаленная."
 	case "/clear":
 		if err := b.store.ClearNotes(ctx, userID); err != nil {
 			return "Не удалось очистить заметки. Попробуйте позже."
 		}
-		return "Все заметки удалены."
+		return "Все заметки помечены как удаленные."
 	case "/link":
-		return b.handleLink(ctx, userID, fields)
+		return b.handleLinkCreate(ctx, userID, fields)
+	case "/link_edit":
+		return b.handleLinkEdit(ctx, userID, fields)
+	case "/link_delete":
+		return b.handleLinkDelete(ctx, userID, fields)
 	default:
 		return "Неизвестная команда. Используйте /help."
 	}
 }
 
-// handleLink создает связь между заметками пользователя.
-func (b *TelegramBot) handleLink(ctx context.Context, userID int64, fields []string) string {
+// handleLinkCreate создает связь между заметками пользователя.
+func (b *TelegramBot) handleLinkCreate(ctx context.Context, userID int64, fields []string) string {
 	if len(fields) < 3 {
 		return "Укажите две заметки: /link 1 2"
 	}
@@ -181,20 +176,63 @@ func (b *TelegramBot) handleLink(ctx context.Context, userID int64, fields []str
 	if err != nil || toID <= 0 {
 		return "Второй номер должен быть числом: /link 1 2"
 	}
-	if err := b.store.AddLink(ctx, userID, fromID, toID); err != nil {
+	link, err := b.store.AddLink(ctx, userID, fromID, toID)
+	if err != nil {
 		return "Не удалось добавить связь. Попробуйте позже."
 	}
-	return "Связь добавлена."
+	return fmt.Sprintf("Связь #%d добавлена.", link.ID)
+}
+
+// handleLinkEdit редактирует существующую связь.
+func (b *TelegramBot) handleLinkEdit(ctx context.Context, userID int64, fields []string) string {
+	if len(fields) < 3 {
+		return "Используйте /link_edit <link_id> <new_to_id>"
+	}
+	linkID, err := strconv.Atoi(fields[1])
+	if err != nil || linkID <= 0 {
+		return "link_id должен быть положительным числом"
+	}
+	newToID, err := strconv.Atoi(fields[2])
+	if err != nil || newToID <= 0 {
+		return "new_to_id должен быть положительным числом"
+	}
+	updated, err := b.store.UpdateLink(ctx, userID, uint(linkID), uint(newToID))
+	if err != nil {
+		return "Не удалось обновить связь."
+	}
+	if !updated {
+		return "Связь не найдена."
+	}
+	return "Связь обновлена."
+}
+
+// handleLinkDelete удаляет связь между заметками.
+func (b *TelegramBot) handleLinkDelete(ctx context.Context, userID int64, fields []string) string {
+	if len(fields) < 2 {
+		return "Используйте /link_delete <link_id>"
+	}
+	linkID, err := strconv.Atoi(fields[1])
+	if err != nil || linkID <= 0 {
+		return "link_id должен быть положительным числом"
+	}
+	deleted, err := b.store.DeleteLink(ctx, userID, uint(linkID))
+	if err != nil {
+		return "Не удалось удалить связь."
+	}
+	if !deleted {
+		return "Связь не найдена."
+	}
+	return "Связь удалена."
 }
 
 // formatNotesWithLinks формирует список заметок с указанием связей.
 func formatNotesWithLinks(notes []Note, links []NoteLink) string {
-	linksMap := make(map[int][]int)
+	linksMap := make(map[uint][]uint)
 	for _, link := range links {
 		linksMap[link.FromID] = append(linksMap[link.FromID], link.ToID)
 	}
-	for _, ids := range linksMap {
-		sort.Ints(ids)
+	for id := range linksMap {
+		sort.Slice(linksMap[id], func(i, j int) bool { return linksMap[id][i] < linksMap[id][j] })
 	}
 
 	lines := make([]string, 0, len(notes)+1)
@@ -202,18 +240,18 @@ func formatNotesWithLinks(notes []Note, links []NoteLink) string {
 	for _, note := range notes {
 		line := fmt.Sprintf("%d. %s", note.ID, note.Text)
 		if linked := linksMap[note.ID]; len(linked) > 0 {
-			line = fmt.Sprintf("%s (связи: %s)", line, joinInts(linked))
+			line = fmt.Sprintf("%s (связи: %s)", line, joinUints(linked))
 		}
 		lines = append(lines, line)
 	}
 	return strings.Join(lines, "\n")
 }
 
-// joinInts форматирует список чисел в строку.
-func joinInts(values []int) string {
+// joinUints форматирует список чисел в строку.
+func joinUints(values []uint) string {
 	parts := make([]string, 0, len(values))
 	for _, value := range values {
-		parts = append(parts, strconv.Itoa(value))
+		parts = append(parts, strconv.FormatUint(uint64(value), 10))
 	}
 	return strings.Join(parts, ", ")
 }
@@ -230,9 +268,11 @@ func helpMessage() string {
 		"/login <логин> <пароль> — авторизация",
 		"/add <текст> — добавить заметку",
 		"/list — список заметок",
-		"/link <id1> <id2> — связь между заметками",
-		"/delete <номер> — удалить заметку",
-		"/clear — удалить все заметки",
+		"/link <id1> <id2> — создать связь",
+		"/link_edit <link_id> <new_to_id> — редактировать связь",
+		"/link_delete <link_id> — удалить связь",
+		"/delete <номер> — пометить заметку удаленной",
+		"/clear — пометить все заметки удаленными",
 		"/help — справка",
 	}, "\n")
 }

@@ -15,10 +15,7 @@ type API struct {
 
 // NewAPI создает API с заданным хранилищем и учетными данными.
 func NewAPI(store *NotesStore, user, password string) *API {
-	return &API{
-		store: store,
-		auth:  AuthMiddleware{User: user, Password: password},
-	}
+	return &API{store: store, auth: AuthMiddleware{User: user, Password: password}}
 }
 
 // Handler возвращает http.Handler со всеми маршрутами API.
@@ -26,7 +23,7 @@ func (a *API) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/notes", a.handleNotes)
 	mux.HandleFunc("/notes/", a.handleNoteByID)
-
+	mux.HandleFunc("/links/", a.handleLinkByID)
 	return LoggingMiddleware(a.auth.Wrap(mux))
 }
 
@@ -68,6 +65,56 @@ func (a *API) handleNoteByID(w http.ResponseWriter, r *http.Request) {
 	}
 
 	http.NotFound(w, r)
+}
+
+// handleLinkByID позволяет редактировать и удалять связь.
+func (a *API) handleLinkByID(w http.ResponseWriter, r *http.Request) {
+	idStr := strings.TrimPrefix(r.URL.Path, "/links/")
+	linkID, err := strconv.Atoi(idStr)
+	if err != nil || linkID <= 0 {
+		http.Error(w, "invalid link id", http.StatusBadRequest)
+		return
+	}
+
+	userID, err := userIDFromQuery(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	switch r.Method {
+	case http.MethodPatch:
+		var payload struct {
+			ToID uint `json:"to_id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil || payload.ToID == 0 {
+			http.Error(w, "invalid payload", http.StatusBadRequest)
+			return
+		}
+		updated, err := a.store.UpdateLink(r.Context(), userID, uint(linkID), payload.ToID)
+		if err != nil {
+			http.Error(w, "failed to update link", http.StatusInternalServerError)
+			return
+		}
+		if !updated {
+			http.Error(w, "link not found", http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	case http.MethodDelete:
+		deleted, err := a.store.DeleteLink(r.Context(), userID, uint(linkID))
+		if err != nil {
+			http.Error(w, "failed to delete link", http.StatusInternalServerError)
+			return
+		}
+		if !deleted {
+			http.Error(w, "link not found", http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
 }
 
 // handleListNotes возвращает список заметок пользователя.
@@ -117,7 +164,7 @@ func (a *API) handleCreateNote(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, note)
 }
 
-// handleDeleteNote удаляет заметку пользователя.
+// handleDeleteNote помечает заметку как удаленную.
 func (a *API) handleDeleteNote(w http.ResponseWriter, r *http.Request, id int) {
 	if r.Method != http.MethodDelete {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -163,19 +210,16 @@ func (a *API) handleLinks(w http.ResponseWriter, r *http.Request, fromID int) {
 		var payload struct {
 			ToID int `json:"to_id"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil || payload.ToID <= 0 {
 			http.Error(w, "invalid payload", http.StatusBadRequest)
 			return
 		}
-		if payload.ToID <= 0 {
-			http.Error(w, "to_id is required", http.StatusBadRequest)
-			return
-		}
-		if err := a.store.AddLink(r.Context(), userID, fromID, payload.ToID); err != nil {
+		link, err := a.store.AddLink(r.Context(), userID, fromID, payload.ToID)
+		if err != nil {
 			http.Error(w, "failed to add link", http.StatusInternalServerError)
 			return
 		}
-		w.WriteHeader(http.StatusNoContent)
+		writeJSON(w, http.StatusCreated, link)
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
