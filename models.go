@@ -16,6 +16,7 @@ const (
 type Note struct {
 	ID        uint       `gorm:"primaryKey" json:"id"`
 	UserID    int64      `gorm:"index;not null" json:"user_id"`
+	Title     string     `gorm:"type:varchar(255);not null" json:"title"`
 	Text      string     `gorm:"type:text;not null" json:"text"`
 	Status    NoteStatus `gorm:"type:varchar(16);not null;default:'active';index" json:"status"`
 	CreatedAt time.Time  `json:"created_at"`

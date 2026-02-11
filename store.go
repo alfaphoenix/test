@@ -42,8 +42,8 @@ func (s *NotesStore) Close() error {
 }
 
 // AddNote сохраняет новую активную заметку пользователя.
-func (s *NotesStore) AddNote(ctx context.Context, userID int64, text string) (Note, error) {
-	note := Note{UserID: userID, Text: text, Status: NoteStatusActive}
+func (s *NotesStore) AddNote(ctx context.Context, userID int64, title, text string) (Note, error) {
+	note := Note{UserID: userID, Title: title, Text: text, Status: NoteStatusActive}
 	if err := s.db.WithContext(ctx).Create(&note).Error; err != nil {
 		return Note{}, err
 	}
