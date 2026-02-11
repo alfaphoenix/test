@@ -13,16 +13,38 @@ import (
 
 // TelegramBot отвечает за обработку сообщений Telegram.
 type TelegramBot struct {
-	store     *NotesStore
-	token     string
-	login     string
-	password  string
-	parseMode string
+	store       *NotesStore
+	token       string
+	login       string
+	password    string
+	parseMode   string
+	addRequests map[int64]addNoteRequest
 }
+
+// addNoteRequest хранит состояние пошагового создания заметки через /add.
+type addNoteRequest struct {
+	title string
+	step  addNoteStep
+}
+
+// addNoteStep описывает шаг пошагового добавления заметки.
+type addNoteStep string
+
+const (
+	addStepTitle addNoteStep = "title"
+	addStepText  addNoteStep = "text"
+)
 
 // NewTelegramBot создает новый бот с доступом к хранилищу.
 func NewTelegramBot(store *NotesStore, token, login, password string) *TelegramBot {
-	return &TelegramBot{store: store, token: token, login: login, password: password, parseMode: tgbotapi.ModeMarkdown}
+	return &TelegramBot{
+		store:       store,
+		token:       token,
+		login:       login,
+		password:    password,
+		parseMode:   tgbotapi.ModeMarkdown,
+		addRequests: make(map[int64]addNoteRequest),
+	}
 }
 
 // Start запускает цикл получения обновлений.
@@ -68,6 +90,11 @@ func (b *TelegramBot) handleMessage(ctx context.Context, userID int64, text stri
 	if text == "" {
 		return "Пришлите команду или текст заметки. Используйте /help для справки."
 	}
+
+	if request, ok := b.addRequests[userID]; ok && !strings.HasPrefix(text, "/") {
+		return b.handleAddFlowInput(ctx, userID, text, request)
+	}
+
 	fields := strings.Fields(text)
 	command := fields[0]
 
@@ -109,15 +136,8 @@ func (b *TelegramBot) handleAuthorized(ctx context.Context, userID int64, comman
 
 	switch command {
 	case "/add":
-		payload := strings.TrimSpace(strings.TrimPrefix(text, command))
-		if payload == "" {
-			return "Добавьте текст заметки: /add купить молоко"
-		}
-		note, err := b.store.AddNote(ctx, userID, payload)
-		if err != nil {
-			return "Не удалось сохранить заметку. Попробуйте позже."
-		}
-		return fmt.Sprintf("Заметка #%d сохранена.", note.ID)
+		b.addRequests[userID] = addNoteRequest{step: addStepTitle}
+		return "Введите название заметки."
 	case "/list":
 		notes, err := b.store.ListNotes(ctx, userID)
 		if err != nil {
@@ -225,6 +245,33 @@ func (b *TelegramBot) handleLinkDelete(ctx context.Context, userID int64, fields
 	return "Связь удалена."
 }
 
+// handleAddFlowInput принимает данные для пошагового добавления заметки.
+func (b *TelegramBot) handleAddFlowInput(ctx context.Context, userID int64, text string, request addNoteRequest) string {
+	input := strings.TrimSpace(text)
+	if input == "" {
+		if request.step == addStepTitle {
+			return "Название не должно быть пустым. Введите название заметки."
+		}
+		return "Текст не должен быть пустым. Введите текст заметки."
+	}
+
+	switch request.step {
+	case addStepTitle:
+		b.addRequests[userID] = addNoteRequest{title: input, step: addStepText}
+		return "Теперь введите текст заметки."
+	case addStepText:
+		delete(b.addRequests, userID)
+		note, err := b.store.AddNote(ctx, userID, request.title, input)
+		if err != nil {
+			return "Не удалось сохранить заметку. Попробуйте позже."
+		}
+		return fmt.Sprintf("Заметка #%d сохранена.", note.ID)
+	default:
+		delete(b.addRequests, userID)
+		return "Процесс добавления заметки сброшен. Введите /add и попробуйте снова."
+	}
+}
+
 // formatNotesWithLinks формирует список заметок с указанием связей.
 func formatNotesWithLinks(notes []Note, links []NoteLink) string {
 	linksMap := make(map[uint][]uint)
@@ -238,7 +285,7 @@ func formatNotesWithLinks(notes []Note, links []NoteLink) string {
 	lines := make([]string, 0, len(notes)+1)
 	lines = append(lines, "Ваши заметки:")
 	for _, note := range notes {
-		line := fmt.Sprintf("%d. %s", note.ID, note.Text)
+		line := fmt.Sprintf("%d. *%s* — %s", note.ID, note.Title, note.Text)
 		if linked := linksMap[note.ID]; len(linked) > 0 {
 			line = fmt.Sprintf("%s (связи: %s)", line, joinUints(linked))
 		}
@@ -266,7 +313,7 @@ func helpMessage() string {
 	return strings.Join([]string{
 		"Доступные команды:",
 		"/login <логин> <пароль> — авторизация",
-		"/add <текст> — добавить заметку",
+		"/add — добавить заметку (сначала название, потом текст)",
 		"/list — список заметок",
 		"/link <id1> <id2> — создать связь",
 		"/link_edit <link_id> <new_to_id> — редактировать связь",

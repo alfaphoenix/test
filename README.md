@@ -92,7 +92,7 @@ go run .
 | `/start` | Приветствие и краткий гайд | `/start` |
 | `/help` | Справка по командам | `/help` |
 | `/login <login> <password>` | Авторизация пользователя | `/login bot secret` |
-| `/add <text>` | Создать заметку | `/add купить молоко` |
+| `/add` | Создать заметку (бот последовательно запросит название и текст) | `/add` |
 | `/list` | Показать активные заметки и связи | `/list` |
 | `/delete <note_id>` | Пометить заметку как удаленную | `/delete 1` |
 | `/clear` | Пометить все заметки как удаленные | `/clear` |
@@ -130,7 +130,7 @@ curl -u api:secret "http://localhost:8080/notes?user_id=123"
 # 2) Создать заметку
 curl -u api:secret -X POST "http://localhost:8080/notes?user_id=123" \
   -H "Content-Type: application/json" \
-  -d '{"text":"заметка"}'
+  -d '{"title":"Покупки","text":"купить молоко"}'
 
 # 3) Удалить заметку (soft delete)
 curl -u api:secret -X DELETE "http://localhost:8080/notes/1?user_id=123"

@@ -143,19 +143,25 @@ func (a *API) handleCreateNote(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var payload struct {
-		Text string `json:"text"`
+		Title string `json:"title"`
+		Text  string `json:"text"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 		http.Error(w, "invalid payload", http.StatusBadRequest)
 		return
 	}
+	payload.Title = strings.TrimSpace(payload.Title)
 	payload.Text = strings.TrimSpace(payload.Text)
+	if payload.Title == "" {
+		http.Error(w, "title is required", http.StatusBadRequest)
+		return
+	}
 	if payload.Text == "" {
 		http.Error(w, "text is required", http.StatusBadRequest)
 		return
 	}
 
-	note, err := a.store.AddNote(r.Context(), userID, payload.Text)
+	note, err := a.store.AddNote(r.Context(), userID, payload.Title, payload.Text)
 	if err != nil {
 		http.Error(w, "failed to save note", http.StatusInternalServerError)
 		return
