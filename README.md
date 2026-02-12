@@ -9,7 +9,7 @@ Telegram-бот и HTTP API для ведения личных заметок.
 
 - Авторизация пользователей в боте по логину/паролю (`/login`).
 - Добавление заметок (`/add`).
-- Просмотр списка активных заметок (`/list`).
+- Просмотр списка активных заметок (`/list`) с кликабельными названиями.
 - Мягкое удаление заметки (`/delete`) — статус меняется на `deleted`, запись не удаляется физически.
 - Массовая очистка заметок (`/clear`) — все активные заметки пользователя помечаются как удаленные.
 - Создание, редактирование и удаление связей между заметками (`/link`, `/link_edit`, `/link_delete`).
@@ -115,6 +115,7 @@ go run .
 | Метод | Путь | Описание |
 |---|---|---|
 | `GET` | `/notes?user_id=<id>` | Список активных заметок пользователя |
+| `GET` | `/notes/by-title?user_id=<id>&title=<title>` | Получить заметку по названию |
 | `POST` | `/notes?user_id=<id>` | Создание заметки |
 | `DELETE` | `/notes/{note_id}?user_id=<id>` | Мягкое удаление заметки |
 | `POST` | `/notes/{note_id}/links?user_id=<id>` | Создание связи от заметки `note_id` к `to_id` |
@@ -132,20 +133,23 @@ curl -u api:secret -X POST "http://localhost:8080/notes?user_id=123" \
   -H "Content-Type: application/json" \
   -d '{"title":"Покупки","text":"купить молоко"}'
 
-# 3) Удалить заметку (soft delete)
+# 3) Получить заметку по названию
+curl -u api:secret "http://localhost:8080/notes/by-title?user_id=123&title=%D0%9F%D0%BE%D0%BA%D1%83%D0%BF%D0%BA%D0%B8"
+
+# 4) Удалить заметку (soft delete)
 curl -u api:secret -X DELETE "http://localhost:8080/notes/1?user_id=123"
 
-# 4) Создать связь
+# 5) Создать связь
 curl -u api:secret -X POST "http://localhost:8080/notes/1/links?user_id=123" \
   -H "Content-Type: application/json" \
   -d '{"to_id":2}'
 
-# 5) Изменить связь
+# 6) Изменить связь
 curl -u api:secret -X PATCH "http://localhost:8080/links/1?user_id=123" \
   -H "Content-Type: application/json" \
   -d '{"to_id":3}'
 
-# 6) Удалить связь
+# 7) Удалить связь
 curl -u api:secret -X DELETE "http://localhost:8080/links/1?user_id=123"
 ```
 

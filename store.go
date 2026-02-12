@@ -63,6 +63,22 @@ func (s *NotesStore) ListNotes(ctx context.Context, userID int64) ([]Note, error
 	return notes, nil
 }
 
+// GetNoteByTitle возвращает активную заметку пользователя по названию.
+func (s *NotesStore) GetNoteByTitle(ctx context.Context, userID int64, title string) (Note, bool, error) {
+	var note Note
+	err := s.db.WithContext(ctx).
+		Where("user_id = ? AND status = ? AND LOWER(title) = LOWER(?)", userID, NoteStatusActive, title).
+		Order("created_at asc, id asc").
+		First(&note).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return Note{}, false, nil
+		}
+		return Note{}, false, err
+	}
+	return note, true, nil
+}
+
 // DeleteNote не удаляет запись физически, а меняет статус на deleted.
 func (s *NotesStore) DeleteNote(ctx context.Context, userID int64, id int) (bool, error) {
 	result := s.db.WithContext(ctx).

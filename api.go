@@ -22,6 +22,7 @@ func NewAPI(store *NotesStore, user, password string) *API {
 func (a *API) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/notes", a.handleNotes)
+	mux.HandleFunc("/notes/by-title", a.handleNoteByTitle)
 	mux.HandleFunc("/notes/", a.handleNoteByID)
 	mux.HandleFunc("/links/", a.handleLinkByID)
 	return LoggingMiddleware(a.auth.Wrap(mux))
@@ -37,6 +38,38 @@ func (a *API) handleNotes(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+// handleNoteByTitle возвращает заметку по точному названию (без учета регистра).
+func (a *API) handleNoteByTitle(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	userID, err := userIDFromQuery(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	title := strings.TrimSpace(r.URL.Query().Get("title"))
+	if title == "" {
+		http.Error(w, "title is required", http.StatusBadRequest)
+		return
+	}
+
+	note, found, err := a.store.GetNoteByTitle(r.Context(), userID, title)
+	if err != nil {
+		http.Error(w, "failed to get note", http.StatusInternalServerError)
+		return
+	}
+	if !found {
+		http.Error(w, "note not found", http.StatusNotFound)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, note)
 }
 
 // handleNoteByID маршрутизирует запросы для конкретной заметки.
