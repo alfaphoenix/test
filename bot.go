@@ -8,21 +8,45 @@ import (
 	"strconv"
 	"strings"
 
+	"net/url"
+
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
 // TelegramBot отвечает за обработку сообщений Telegram.
 type TelegramBot struct {
-	store     *NotesStore
-	token     string
-	login     string
-	password  string
-	parseMode string
+	store       *NotesStore
+	token       string
+	login       string
+	password    string
+	parseMode   string
+	addRequests map[int64]addNoteRequest
 }
+
+// addNoteRequest хранит состояние пошагового создания заметки через /add.
+type addNoteRequest struct {
+	title string
+	step  addNoteStep
+}
+
+// addNoteStep описывает шаг пошагового добавления заметки.
+type addNoteStep string
+
+const (
+	addStepTitle addNoteStep = "title"
+	addStepText  addNoteStep = "text"
+)
 
 // NewTelegramBot создает новый бот с доступом к хранилищу.
 func NewTelegramBot(store *NotesStore, token, login, password string) *TelegramBot {
-	return &TelegramBot{store: store, token: token, login: login, password: password, parseMode: tgbotapi.ModeMarkdown}
+	return &TelegramBot{
+		store:       store,
+		token:       token,
+		login:       login,
+		password:    password,
+		parseMode:   tgbotapi.ModeMarkdown,
+		addRequests: make(map[int64]addNoteRequest),
+	}
 }
 
 // Start запускает цикл получения обновлений.
@@ -68,6 +92,14 @@ func (b *TelegramBot) handleMessage(ctx context.Context, userID int64, text stri
 	if text == "" {
 		return "Пришлите команду или текст заметки. Используйте /help для справки."
 	}
+
+	if request, ok := b.addRequests[userID]; ok && !strings.HasPrefix(text, "/") {
+		return b.handleAddFlowInput(ctx, userID, text, request)
+	}
+	if !strings.HasPrefix(text, "/") {
+		return b.handleNoteLookupByTitle(ctx, userID, text)
+	}
+
 	fields := strings.Fields(text)
 	command := fields[0]
 
@@ -109,15 +141,8 @@ func (b *TelegramBot) handleAuthorized(ctx context.Context, userID int64, comman
 
 	switch command {
 	case "/add":
-		payload := strings.TrimSpace(strings.TrimPrefix(text, command))
-		if payload == "" {
-			return "Добавьте текст заметки: /add купить молоко"
-		}
-		note, err := b.store.AddNote(ctx, userID, payload)
-		if err != nil {
-			return "Не удалось сохранить заметку. Попробуйте позже."
-		}
-		return fmt.Sprintf("Заметка #%d сохранена.", note.ID)
+		b.addRequests[userID] = addNoteRequest{step: addStepTitle}
+		return "Введите название заметки."
 	case "/list":
 		notes, err := b.store.ListNotes(ctx, userID)
 		if err != nil {
@@ -225,6 +250,91 @@ func (b *TelegramBot) handleLinkDelete(ctx context.Context, userID int64, fields
 	return "Связь удалена."
 }
 
+// handleNoteLookupByTitle ищет заметку по названию и выводит подробности.
+func (b *TelegramBot) handleNoteLookupByTitle(ctx context.Context, userID int64, text string) string {
+	authorized, err := b.store.IsUserAuthorized(ctx, userID)
+	if err != nil {
+		return "Не удалось проверить авторизацию."
+	}
+	if !authorized {
+		return "Сначала выполните /login <логин> <пароль>."
+	}
+
+	note, found, err := b.store.GetNoteByTitle(ctx, userID, text)
+	if err != nil {
+		return "Не удалось найти заметку. Попробуйте позже."
+	}
+	if !found {
+		return "Неизвестная команда. Используйте /help."
+	}
+
+	links, err := b.store.ListLinksForNote(ctx, userID, int(note.ID))
+	if err != nil {
+		return "Не удалось получить связи заметки."
+	}
+	linkedTitles := b.linkedTitlesByIDs(ctx, userID, links)
+
+	return strings.Join([]string{
+		fmt.Sprintf("Название: %s", note.Title),
+		fmt.Sprintf("Текст: %s", note.Text),
+		fmt.Sprintf("Связи: %s", strings.Join(linkedTitles, ", ")),
+	}, "\n")
+}
+
+// linkedTitlesByIDs возвращает список названий связанных заметок.
+func (b *TelegramBot) linkedTitlesByIDs(ctx context.Context, userID int64, links []NoteLink) []string {
+	if len(links) == 0 {
+		return []string{"нет"}
+	}
+
+	notes, err := b.store.ListNotes(ctx, userID)
+	if err != nil {
+		return []string{"недоступно"}
+	}
+	titlesByID := make(map[uint]string, len(notes))
+	for _, note := range notes {
+		titlesByID[note.ID] = note.Title
+	}
+
+	titles := make([]string, 0, len(links))
+	for _, link := range links {
+		title, ok := titlesByID[link.ToID]
+		if !ok {
+			titles = append(titles, fmt.Sprintf("#%d", link.ToID))
+			continue
+		}
+		titles = append(titles, title)
+	}
+	return titles
+}
+
+// handleAddFlowInput принимает данные для пошагового добавления заметки.
+func (b *TelegramBot) handleAddFlowInput(ctx context.Context, userID int64, text string, request addNoteRequest) string {
+	input := strings.TrimSpace(text)
+	if input == "" {
+		if request.step == addStepTitle {
+			return "Название не должно быть пустым. Введите название заметки."
+		}
+		return "Текст не должен быть пустым. Введите текст заметки."
+	}
+
+	switch request.step {
+	case addStepTitle:
+		b.addRequests[userID] = addNoteRequest{title: input, step: addStepText}
+		return "Теперь введите текст заметки."
+	case addStepText:
+		delete(b.addRequests, userID)
+		note, err := b.store.AddNote(ctx, userID, request.title, input)
+		if err != nil {
+			return "Не удалось сохранить заметку. Попробуйте позже."
+		}
+		return fmt.Sprintf("Заметка #%d сохранена.", note.ID)
+	default:
+		delete(b.addRequests, userID)
+		return "Процесс добавления заметки сброшен. Введите /add и попробуйте снова."
+	}
+}
+
 // formatNotesWithLinks формирует список заметок с указанием связей.
 func formatNotesWithLinks(notes []Note, links []NoteLink) string {
 	linksMap := make(map[uint][]uint)
@@ -238,7 +348,7 @@ func formatNotesWithLinks(notes []Note, links []NoteLink) string {
 	lines := make([]string, 0, len(notes)+1)
 	lines = append(lines, "Ваши заметки:")
 	for _, note := range notes {
-		line := fmt.Sprintf("%d. %s", note.ID, note.Text)
+		line := fmt.Sprintf("%d. [%s](%s) — %s", note.ID, note.Title, noteTitleShareLink(note.Title), note.Text)
 		if linked := linksMap[note.ID]; len(linked) > 0 {
 			line = fmt.Sprintf("%s (связи: %s)", line, joinUints(linked))
 		}
@@ -256,6 +366,11 @@ func joinUints(values []uint) string {
 	return strings.Join(parts, ", ")
 }
 
+// noteTitleShareLink формирует ссылку, которая подставляет название в сообщение чата.
+func noteTitleShareLink(title string) string {
+	return "https://t.me/share/url?url=&text=" + url.QueryEscape(title)
+}
+
 // startMessage возвращает приветственное сообщение.
 func startMessage() string {
 	return "Привет! Я помогу хранить ваши заметки. Введите /help для списка команд."
@@ -266,8 +381,8 @@ func helpMessage() string {
 	return strings.Join([]string{
 		"Доступные команды:",
 		"/login <логин> <пароль> — авторизация",
-		"/add <текст> — добавить заметку",
-		"/list — список заметок",
+		"/add — добавить заметку (сначала название, потом текст)",
+		"/list — список заметок (названия кликабельны)",
 		"/link <id1> <id2> — создать связь",
 		"/link_edit <link_id> <new_to_id> — редактировать связь",
 		"/link_delete <link_id> — удалить связь",

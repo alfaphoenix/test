@@ -42,8 +42,8 @@ func (s *NotesStore) Close() error {
 }
 
 // AddNote сохраняет новую активную заметку пользователя.
-func (s *NotesStore) AddNote(ctx context.Context, userID int64, text string) (Note, error) {
-	note := Note{UserID: userID, Text: text, Status: NoteStatusActive}
+func (s *NotesStore) AddNote(ctx context.Context, userID int64, title, text string) (Note, error) {
+	note := Note{UserID: userID, Title: title, Text: text, Status: NoteStatusActive}
 	if err := s.db.WithContext(ctx).Create(&note).Error; err != nil {
 		return Note{}, err
 	}
@@ -61,6 +61,22 @@ func (s *NotesStore) ListNotes(ctx context.Context, userID int64) ([]Note, error
 		return nil, err
 	}
 	return notes, nil
+}
+
+// GetNoteByTitle возвращает активную заметку пользователя по названию.
+func (s *NotesStore) GetNoteByTitle(ctx context.Context, userID int64, title string) (Note, bool, error) {
+	var note Note
+	err := s.db.WithContext(ctx).
+		Where("user_id = ? AND status = ? AND LOWER(title) = LOWER(?)", userID, NoteStatusActive, title).
+		Order("created_at asc, id asc").
+		First(&note).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return Note{}, false, nil
+		}
+		return Note{}, false, err
+	}
+	return note, true, nil
 }
 
 // DeleteNote не удаляет запись физически, а меняет статус на deleted.
