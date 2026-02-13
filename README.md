@@ -9,11 +9,25 @@ Telegram-бот и HTTP API для ведения личных заметок.
 
 - Авторизация пользователей в боте по логину/паролю (`/login`).
 - Добавление заметок (`/add`).
-- Просмотр списка активных заметок (`/list`).
+- Просмотр списка активных заметок (`/list`) с кликабельными названиями.
 - Мягкое удаление заметки (`/delete`) — статус меняется на `deleted`, запись не удаляется физически.
 - Массовая очистка заметок (`/clear`) — все активные заметки пользователя помечаются как удаленные.
 - Создание, редактирование и удаление связей между заметками (`/link`, `/link_edit`, `/link_delete`).
 - Управление заметками и связями через HTTP API.
+
+
+## Архитектура (Clean Architecture)
+
+Проект разделен на слои:
+
+- `internal/domain` — доменные сущности и контракты репозиториев.
+- `internal/usecase` — бизнес-логика приложения (сценарии работы с заметками).
+- `internal/infrastructure/postgres` — реализация репозитория на PostgreSQL/GORM.
+- `internal/interfaces/httpapi` — HTTP transport (handlers + middleware).
+- `internal/interfaces/telegram` — Telegram transport (бот и команды).
+- `main.go` — слой композиции зависимостей (composition root).
+
+Зависимости направлены внутрь: `interfaces -> usecase -> domain`, а инфраструктура подключается через интерфейсы.
 
 ## Технологии
 
@@ -92,7 +106,7 @@ go run .
 | `/start` | Приветствие и краткий гайд | `/start` |
 | `/help` | Справка по командам | `/help` |
 | `/login <login> <password>` | Авторизация пользователя | `/login bot secret` |
-| `/add <text>` | Создать заметку | `/add купить молоко` |
+| `/add` | Создать заметку (бот последовательно запросит название и текст) | `/add` |
 | `/list` | Показать активные заметки и связи | `/list` |
 | `/delete <note_id>` | Пометить заметку как удаленную | `/delete 1` |
 | `/clear` | Пометить все заметки как удаленные | `/clear` |
@@ -115,6 +129,7 @@ go run .
 | Метод | Путь | Описание |
 |---|---|---|
 | `GET` | `/notes?user_id=<id>` | Список активных заметок пользователя |
+| `GET` | `/notes/by-title?user_id=<id>&title=<title>` | Получить заметку по названию |
 | `POST` | `/notes?user_id=<id>` | Создание заметки |
 | `DELETE` | `/notes/{note_id}?user_id=<id>` | Мягкое удаление заметки |
 | `POST` | `/notes/{note_id}/links?user_id=<id>` | Создание связи от заметки `note_id` к `to_id` |
@@ -130,35 +145,37 @@ curl -u api:secret "http://localhost:8080/notes?user_id=123"
 # 2) Создать заметку
 curl -u api:secret -X POST "http://localhost:8080/notes?user_id=123" \
   -H "Content-Type: application/json" \
-  -d '{"text":"заметка"}'
+  -d '{"title":"Покупки","text":"купить молоко"}'
 
-# 3) Удалить заметку (soft delete)
+# 3) Получить заметку по названию
+curl -u api:secret "http://localhost:8080/notes/by-title?user_id=123&title=%D0%9F%D0%BE%D0%BA%D1%83%D0%BF%D0%BA%D0%B8"
+
+# 4) Удалить заметку (soft delete)
 curl -u api:secret -X DELETE "http://localhost:8080/notes/1?user_id=123"
 
-# 4) Создать связь
+# 5) Создать связь
 curl -u api:secret -X POST "http://localhost:8080/notes/1/links?user_id=123" \
   -H "Content-Type: application/json" \
   -d '{"to_id":2}'
 
-# 5) Изменить связь
+# 6) Изменить связь
 curl -u api:secret -X PATCH "http://localhost:8080/links/1?user_id=123" \
   -H "Content-Type: application/json" \
   -d '{"to_id":3}'
 
-# 6) Удалить связь
+# 7) Удалить связь
 curl -u api:secret -X DELETE "http://localhost:8080/links/1?user_id=123"
 ```
 
 ## Структура проекта
 
-- `main.go` — точка входа, запуск HTTP-сервера и Telegram-бота, graceful shutdown.
-- `config.go` — загрузка `.env` и конфигурации.
-- `store.go` — доступ к БД и бизнес-операции с заметками/связями/авторизацией.
-- `models.go` — модели GORM (`Note`, `NoteLink`, `AuthorizedUser`).
-- `api.go` — HTTP-обработчики.
-- `middleware.go` — Basic Auth и request logging.
-- `bot.go` — Telegram-логика и обработка команд.
-- `errors.go` — общие ошибки приложения.
+- `main.go` — точка входа и wiring зависимостей.
+- `internal/config/config.go` — загрузка конфигурации из окружения.
+- `internal/domain` — доменные сущности и интерфейсы.
+- `internal/usecase` — application service для заметок/связей/авторизации.
+- `internal/infrastructure/postgres/store.go` — GORM репозиторий и миграции.
+- `internal/interfaces/httpapi` — HTTP API и middleware.
+- `internal/interfaces/telegram/bot.go` — Telegram-логика и команды.
 
 ## Особенности поведения
 
