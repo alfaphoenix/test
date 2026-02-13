@@ -15,6 +15,20 @@ Telegram-бот и HTTP API для ведения личных заметок.
 - Создание, редактирование и удаление связей между заметками (`/link`, `/link_edit`, `/link_delete`).
 - Управление заметками и связями через HTTP API.
 
+
+## Архитектура (Clean Architecture)
+
+Проект разделен на слои:
+
+- `internal/domain` — доменные сущности и контракты репозиториев.
+- `internal/usecase` — бизнес-логика приложения (сценарии работы с заметками).
+- `internal/infrastructure/postgres` — реализация репозитория на PostgreSQL/GORM.
+- `internal/interfaces/httpapi` — HTTP transport (handlers + middleware).
+- `internal/interfaces/telegram` — Telegram transport (бот и команды).
+- `main.go` — слой композиции зависимостей (composition root).
+
+Зависимости направлены внутрь: `interfaces -> usecase -> domain`, а инфраструктура подключается через интерфейсы.
+
 ## Технологии
 
 - Go 1.24+
@@ -155,14 +169,13 @@ curl -u api:secret -X DELETE "http://localhost:8080/links/1?user_id=123"
 
 ## Структура проекта
 
-- `main.go` — точка входа, запуск HTTP-сервера и Telegram-бота, graceful shutdown.
-- `config.go` — загрузка `.env` и конфигурации.
-- `store.go` — доступ к БД и бизнес-операции с заметками/связями/авторизацией.
-- `models.go` — модели GORM (`Note`, `NoteLink`, `AuthorizedUser`).
-- `api.go` — HTTP-обработчики.
-- `middleware.go` — Basic Auth и request logging.
-- `bot.go` — Telegram-логика и обработка команд.
-- `errors.go` — общие ошибки приложения.
+- `main.go` — точка входа и wiring зависимостей.
+- `internal/config/config.go` — загрузка конфигурации из окружения.
+- `internal/domain` — доменные сущности и интерфейсы.
+- `internal/usecase` — application service для заметок/связей/авторизации.
+- `internal/infrastructure/postgres/store.go` — GORM репозиторий и миграции.
+- `internal/interfaces/httpapi` — HTTP API и middleware.
+- `internal/interfaces/telegram/bot.go` — Telegram-логика и команды.
 
 ## Особенности поведения
 
